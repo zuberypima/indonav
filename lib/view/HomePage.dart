@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:indonav/view/CampasMapView.dart';
 import 'package:indonav/view/VisitorHomePage.dart';
 import 'package:indonav/view/QRScannerPage.dart';
+import 'package:indonav/view/VisitorRegistrationPage.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -52,7 +54,7 @@ class _HomePageState extends State<HomePage> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const VisitorHomePage(),
+                        builder: (context) => const VisitorRegistrationPage(),
                       ),
                     );
                   },
@@ -93,6 +95,29 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   child: const Text('Scan QR Code'),
+                ),
+                const SizedBox(height: 40),
+
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => CampasMapView()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.deepOrange,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 40,
+                      vertical: 16,
+                    ),
+                    textStyle: const TextStyle(fontSize: 18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Campus View'),
                 ),
               ],
             ),

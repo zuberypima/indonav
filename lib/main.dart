@@ -5,6 +5,7 @@ import 'package:indonav/view/CampasMapView.dart';
 import 'package:indonav/view/HomePage.dart';
 import 'package:indonav/view/PointsMaps.dart';
 import 'package:indonav/view/VisitorHomePage.dart';
+import 'package:indonav/view/VisitorRegistrationPage.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 void main() async {
@@ -31,10 +32,11 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
       ),
       home:
+          //  VisitorRegistrationPage(),
           //  Pointsmaps(),
-          //  CampasMapView(),
+          // CampasMapView(),
           HomePage(),
-      //  VisitorHomePage(),
+      // VisitorHomePage(),
     );
   }
 }
