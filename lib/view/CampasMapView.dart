@@ -1,11 +1,19 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' as gl;
+import 'package:indonav/view/QRScannerPage.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mp;
+import 'package:permission_handler/permission_handler.dart';
 
 class CampasMapView extends StatefulWidget {
-  const CampasMapView({super.key});
+  final double targetLatitude;
+  final double targetLongitude;
+
+  const CampasMapView({
+    super.key,
+    required this.targetLatitude,
+    required this.targetLongitude,
+  });
 
   @override
   State<CampasMapView> createState() => _CampasMapViewState();
@@ -13,31 +21,50 @@ class CampasMapView extends StatefulWidget {
 
 class _CampasMapViewState extends State<CampasMapView> {
   mp.MapboxMap? mapboxMapController;
-
   StreamSubscription? userPositionStream;
 
   @override
   void initState() {
-    // TODO: implement initState
     super.initState();
-    _setupPositionTracking();
+    _requestLocationPermission();
   }
 
   @override
   void dispose() {
-    // TODO: implement dispose
     userPositionStream?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(),
-      body: mp.MapWidget(
-        onMapCreated: _onMapCreated,
-        styleUri: 'mapbox://styles/pimatech/cmbajxlw700vo01r4bqbmdrnk',
-        // mp.MapboxStyles.MAPBOX_STREETS,
+    return WillPopScope(
+      onWillPop: () async {
+        // Navigate back to QRScannerPage
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const QRScannerPage()),
+        );
+        return false; // Prevent default pop
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Campus Map'),
+          centerTitle: true,
+          backgroundColor: Colors.deepOrange,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const QRScannerPage()),
+              );
+            },
+          ),
+        ),
+        body: mp.MapWidget(
+          onMapCreated: _onMapCreated,
+          styleUri: 'mapbox://styles/pimatech/cmbajxlw700vo01r4bqbmdrnk',
+        ),
       ),
     );
   }
@@ -47,58 +74,106 @@ class _CampasMapViewState extends State<CampasMapView> {
       mapboxMapController = controller;
     });
 
+    // Enable user location
     mapboxMapController?.location.updateSettings(
       mp.LocationComponentSettings(enabled: true, pulsingEnabled: true),
     );
+
+    // Center map on target coordinates
+    mapboxMapController?.setCamera(
+      mp.CameraOptions(
+        zoom: 15,
+        center: mp.Point(
+          coordinates: mp.Position(
+            widget.targetLongitude,
+            widget.targetLatitude,
+          ),
+        ),
+      ),
+    );
+
+    // Add marker for department
+    mapboxMapController?.annotations.createPointAnnotationManager().then((
+      manager,
+    ) {
+      manager.create(
+        mp.PointAnnotationOptions(
+          geometry: mp.Point(
+            coordinates: mp.Position(
+              widget.targetLongitude,
+              widget.targetLatitude,
+            ),
+          ),
+          iconImage: 'pin-icon',
+          iconSize: 0.5,
+        ),
+      );
+    });
+  }
+
+  Future<void> _requestLocationPermission() async {
+    final status = await Permission.location.request();
+    if (status.isGranted) {
+      _setupPositionTracking();
+    } else if (status.isDenied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location permission denied'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else if (status.isPermanentlyDenied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Location permission permanently denied. Please enable in settings.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      await openAppSettings();
+    }
   }
 
   Future<void> _setupPositionTracking() async {
-    bool serviceEnabled;
-    gl.LocationPermission permission;
-
-    serviceEnabled = await gl.Geolocator.isLocationServiceEnabled();
-
-    if (!serviceEnabled) {
-      return Future.error('Location services are disabled');
-    }
-    permission = await gl.Geolocator.checkPermission();
-    if (permission == gl.LocationPermission.denied) {
-      permission = await gl.Geolocator.requestPermission();
-      if (permission == gl.LocationPermission.denied) {
-        return Future.error('Location services are disabled');
-      }
-    }
-
-    if (permission == gl.LocationPermission.deniedForever) {
-      return Future.error(
-        'Location permisions are permanent denaide, we cannot request  permision',
+    if (!await gl.Geolocator.isLocationServiceEnabled()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location services are disabled'),
+          backgroundColor: Colors.red,
+        ),
       );
+      return;
     }
 
-    gl.LocationSettings locationSettings = gl.LocationSettings(
+    final gl.LocationSettings locationSettings = gl.LocationSettings(
       accuracy: gl.LocationAccuracy.high,
-      distanceFilter: 100,
+      distanceFilter: 10,
     );
 
     userPositionStream?.cancel();
     userPositionStream = gl.Geolocator.getPositionStream(
       locationSettings: locationSettings,
-    ).listen((gl.Position? position) {
-      if (position != null && mapboxMapController != null) {
-        mapboxMapController?.setCamera(
-          mp.CameraOptions(
-            zoom: 15,
+    ).listen(
+      (gl.Position position) {
+        if (!mounted || mapboxMapController == null) return;
 
-            center: mp.Point(
-              coordinates: mp.Position(
-                33.416138,
-                -8.941800,
-                //  position.latitude
-              ),
-            ),
+        mapboxMapController?.location.updateSettings(
+          mp.LocationComponentSettings(enabled: true, pulsingEnabled: true),
+        );
+      },
+      onError: (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Location error: $e'),
+            backgroundColor: Colors.red,
           ),
         );
-      }
-    });
+      },
+    );
   }
 }

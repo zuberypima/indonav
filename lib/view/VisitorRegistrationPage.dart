@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:email_validator/email_validator.dart';
+import 'package:indonav/view/CampasMapView.dart';
+import 'package:indonav/view/QRScannerPage.dart';
 
 class VisitorRegistrationPage extends StatefulWidget {
-  const VisitorRegistrationPage({Key? key}) : super(key: key);
+  final Map<String, dynamic>? scannedDepartment;
+
+  const VisitorRegistrationPage({super.key, this.scannedDepartment});
 
   @override
   _VisitorRegistrationPageState createState() =>
@@ -11,377 +16,351 @@ class VisitorRegistrationPage extends StatefulWidget {
 
 class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
   final _formKey = GlobalKey<FormState>();
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
-  final _phoneNumberController = TextEditingController();
   final _purposeController = TextEditingController();
-  String? _selectedHostId;
+  final _hostController = TextEditingController();
   String? _selectedDepartmentId;
+  String? _selectedHostId;
+  bool _isSubmitting = false;
+  bool _useManualHost = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.clear();
+    _emailController.clear();
+    _purposeController.clear();
+    _hostController.clear();
+    if (widget.scannedDepartment != null) {
+      _selectedDepartmentId = widget.scannedDepartment!['departmentId'];
+    }
+  }
 
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
+    _nameController.dispose();
     _emailController.dispose();
-    _phoneNumberController.dispose();
     _purposeController.dispose();
+    _hostController.dispose();
     super.dispose();
+  }
+
+  Future<void> _submitRegistration() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      // Save registration
+      await FirebaseFirestore.instance.collection('visitor_registrations').add({
+        'visitorName': _nameController.text,
+        'email': _emailController.text,
+        'hostName': _useManualHost ? _hostController.text : _selectedHostId,
+        'purpose': _purposeController.text,
+        'departmentId': _selectedDepartmentId,
+        'campusLocationId': widget.scannedDepartment?['campusLocationId'] ?? '',
+        'checkInTime': Timestamp.now(),
+        'checkOutTime': null,
+      });
+
+      // Fetch coordinates
+      double? latitude, longitude;
+      if (widget.scannedDepartment != null &&
+          widget.scannedDepartment!.containsKey('latitude') &&
+          widget.scannedDepartment!.containsKey('longitude')) {
+        latitude = double.tryParse(
+          widget.scannedDepartment!['latitude'].toString(),
+        );
+        longitude = double.tryParse(
+          widget.scannedDepartment!['longitude'].toString(),
+        );
+      } else {
+        final deptDoc =
+            await FirebaseFirestore.instance
+                .collection('departments')
+                .doc(_selectedDepartmentId)
+                .get();
+        if (deptDoc.exists) {
+          final data = deptDoc.data()!;
+          latitude = double.tryParse(data['latitude']?.toString() ?? '');
+          longitude = double.tryParse(data['longitude']?.toString() ?? '');
+        }
+      }
+
+      // Fallback coordinates
+      latitude ??= 33.416138;
+      longitude ??= -8.941800;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registration submitted successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Navigate to CampasMapView
+      await Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder:
+              (context) => CampasMapView(
+                targetLatitude: latitude!,
+                targetLongitude: longitude!,
+              ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Register New Visitor',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
+        title: const Text('Visitor Registration'),
         centerTitle: true,
-        backgroundColor: Colors.blue.shade800,
-        elevation: 4,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.blue.shade50, Colors.white],
-          ),
+        backgroundColor: Colors.deepOrange,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            // Navigate back to QRScannerPage
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const QRScannerPage()),
+            );
+          },
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Visitor Information',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _buildTextFormField(
-                            controller: _firstNameController,
-                            label: 'First Name',
-                            icon: Icons.person,
-                            validator:
-                                (value) =>
-                                    value!.isEmpty
-                                        ? 'First name is required'
-                                        : null,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildTextFormField(
-                            controller: _lastNameController,
-                            label: 'Last Name',
-                            icon: Icons.person_outline,
-                            validator:
-                                (value) =>
-                                    value!.isEmpty
-                                        ? 'Last name is required'
-                                        : null,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildTextFormField(
-                            controller: _emailController,
-                            label: 'Email',
-                            icon: Icons.email,
-                            keyboardType: TextInputType.emailAddress,
-                            validator: (value) {
-                              if (value!.isEmpty) return 'Email is required';
-                              if (!RegExp(
-                                r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                              ).hasMatch(value)) {
-                                return 'Enter a valid email';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          _buildTextFormField(
-                            controller: _phoneNumberController,
-                            label: 'Phone Number',
-                            icon: Icons.phone,
-                            keyboardType: TextInputType.phone,
-                            validator: (value) {
-                              if (value!.isEmpty)
-                                return 'Phone number is required';
-                              if (!RegExp(
-                                r'^\+?[\d\s-]{10,15}$',
-                              ).hasMatch(value)) {
-                                return 'Enter a valid phone number';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          _buildTextFormField(
-                            controller: _purposeController,
-                            label: 'Purpose of Visit',
-                            icon: Icons.description,
-                            maxLines: 2,
-                            validator:
-                                (value) =>
-                                    value!.isEmpty
-                                        ? 'Purpose is required'
-                                        : null,
-                          ),
-                        ],
-                      ),
-                    ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person),
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 20),
-                  Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Visit Details',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          StreamBuilder<QuerySnapshot>(
-                            stream:
-                                FirebaseFirestore.instance
-                                    .collection('departments')
-                                    .snapshots(),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-                              final departments = snapshot.data!.docs;
-                              return _buildDropdownFormField(
-                                items:
-                                    departments.map((doc) {
-                                      final data =
-                                          doc.data() as Map<String, dynamic>;
-                                      return DropdownMenuItem<String>(
-                                        value: doc.id,
-                                        child: Text(data['name']),
-                                      );
-                                    }).toList(),
-                                label: 'Select Department',
-                                icon: Icons.business,
-                                onChanged: (value) {
-                                  _selectedDepartmentId = value;
-                                },
-                                validator:
-                                    (value) =>
-                                        value == null
-                                            ? 'Department selection is required'
-                                            : null,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          StreamBuilder<QuerySnapshot>(
-                            stream:
-                                FirebaseFirestore.instance
-                                    .collection('hosts')
-                                    .snapshots(),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-                              final hosts = snapshot.data!.docs;
-                              return _buildDropdownFormField(
-                                items:
-                                    hosts.map((doc) {
-                                      final data =
-                                          doc.data() as Map<String, dynamic>;
-                                      return DropdownMenuItem<String>(
-                                        value: doc.id,
-                                        child: Text(data['name']),
-                                      );
-                                    }).toList(),
-                                label: 'Select Host',
-                                icon: Icons.person_pin,
-                                onChanged: (value) {
-                                  _selectedHostId = value;
-                                },
-                                validator:
-                                    (value) =>
-                                        value == null
-                                            ? 'Host selection is required'
-                                            : null,
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
+                  validator:
+                      (value) => value!.isEmpty ? 'Name is required' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    prefixIcon: Icon(Icons.email),
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 30),
-                  Center(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (_formKey.currentState!.validate()) {
-                          await FirebaseFirestore.instance
-                              .collection('visitors')
-                              .add({
-                                'visitorId':
-                                    'visitor_${DateTime.now().millisecondsSinceEpoch}',
-                                'firstName': _firstNameController.text,
-                                'lastName': _lastNameController.text,
-                                'email': _emailController.text,
-                                'phoneNumber': _phoneNumberController.text,
-                                'purpose': _purposeController.text,
-                                'checkInTime': Timestamp.now(),
-                                'checkOutTime': null,
-                                'hostId': _selectedHostId,
-                                'departmentId': _selectedDepartmentId,
-                                'status': 'checked-in',
-                                'currentLocationId': null,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value!.isEmpty) return 'Email is required';
+                    if (!EmailValidator.validate(value))
+                      return 'Enter a valid email';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                StreamBuilder<QuerySnapshot>(
+                  key: ValueKey(_selectedDepartmentId),
+                  stream:
+                      _selectedDepartmentId != null
+                          ? FirebaseFirestore.instance
+                              .collection('hosts')
+                              .where(
+                                'departmentId',
+                                isEqualTo: _selectedDepartmentId,
+                              )
+                              .snapshots()
+                          : const Stream.empty(),
+                  builder: (context, snapshot) {
+                    if (_selectedDepartmentId == null) {
+                      return DropdownButtonFormField<String>(
+                        decoration: InputDecoration(
+                          labelText: 'Host',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [],
+                        onChanged: null,
+                        hint: Text('Select a department first'),
+                        validator: (value) => 'Host is required',
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const CircularProgressIndicator();
+                    }
+                    final hosts = snapshot.data!.docs;
+                    if (hosts.isEmpty) {
+                      return Column(
+                        children: [
+                          TextFormField(
+                            controller: _hostController,
+                            decoration: const InputDecoration(
+                              labelText: 'Host Name (Manual Entry)',
+                              prefixIcon: Icon(Icons.person_outline),
+                              border: OutlineInputBorder(),
+                            ),
+                            validator:
+                                (value) =>
+                                    value!.isEmpty
+                                        ? 'Host name is required'
+                                        : null,
+                            onChanged: (value) {
+                              setState(() {
+                                _useManualHost = true;
                               });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Visitor registered successfully'),
-                              backgroundColor: Colors.green,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'No hosts available for this department. Please enter manually.',
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ],
+                      );
+                    }
+                    return DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(
+                        labelText: 'Host',
+                        prefixIcon: Icon(Icons.person_outline),
+                        border: OutlineInputBorder(),
+                      ),
+                      value: _selectedHostId,
+                      items:
+                          hosts.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            return DropdownMenuItem<String>(
+                              value: doc.id,
+                              child: Text(data['name'] ?? 'Unknown'),
+                            );
+                          }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedHostId = value;
+                          _useManualHost = false;
+                        });
+                      },
+                      validator:
+                          (value) =>
+                              value == null && !_useManualHost
+                                  ? 'Host is required'
+                                  : null,
+                      hint: const Text('Select a host'),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _purposeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Purpose of Visit',
+                    prefixIcon: Icon(Icons.note),
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                  validator:
+                      (value) => value!.isEmpty ? 'Purpose is required' : null,
+                ),
+                const SizedBox(height: 16),
+                StreamBuilder<QuerySnapshot>(
+                  stream:
+                      FirebaseFirestore.instance
+                          .collection('departments')
+                          .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const CircularProgressIndicator();
+                    }
+                    final departments = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(
+                        labelText: 'Department',
+                        prefixIcon: Icon(Icons.business),
+                        border: OutlineInputBorder(),
+                      ),
+                      value: _selectedDepartmentId,
+                      items:
+                          departments.map((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            return DropdownMenuItem<String>(
+                              value: doc.id,
+                              child: Text(data['name'] ?? 'Unknown'),
+                            );
+                          }).toList(),
+                      onChanged:
+                          widget.scannedDepartment == null
+                              ? (value) {
+                                setState(() {
+                                  _selectedDepartmentId = value;
+                                  _selectedHostId = null;
+                                  _useManualHost = false;
+                                  _hostController.clear();
+                                });
+                              }
+                              : null,
+                      validator:
+                          (value) =>
+                              value == null ? 'Department is required' : null,
+                      disabledHint:
+                          widget.scannedDepartment != null
+                              ? Text(widget.scannedDepartment!['name'])
+                              : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 24),
+                Center(
+                  child: ElevatedButton(
+                    onPressed: _isSubmitting ? null : _submitRegistration,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepOrange,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child:
+                        _isSubmitting
+                            ? const CircularProgressIndicator(
+                              color: Colors.white,
+                            )
+                            : const Text(
+                              'Submit',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
                               ),
                             ),
-                          );
-                          _formKey.currentState!.reset();
-                          _firstNameController.clear();
-                          _lastNameController.clear();
-                          _emailController.clear();
-                          _phoneNumberController.clear();
-                          _purposeController.clear();
-                          setState(() {
-                            _selectedHostId = null;
-                            _selectedDepartmentId = null;
-                          });
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade800,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 40,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 4,
-                      ),
-                      child: const Text(
-                        'REGISTER VISITOR',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildTextFormField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-    int? maxLines = 1,
-  }) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: Colors.blue),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue, width: 2),
-        ),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      keyboardType: keyboardType,
-      validator: validator,
-      maxLines: maxLines,
-    );
-  }
-
-  Widget _buildDropdownFormField({
-    required List<DropdownMenuItem<String>> items,
-    required String label,
-    required IconData icon,
-    required void Function(String?)? onChanged,
-    required String? Function(String?)? validator,
-  }) {
-    return DropdownButtonFormField<String>(
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: Colors.blue),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Colors.blue, width: 2),
-        ),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      items: items,
-      onChanged: onChanged,
-      validator: validator,
-      dropdownColor: Colors.white,
-      borderRadius: BorderRadius.circular(10),
-      icon: const Icon(Icons.arrow_drop_down, color: Colors.blue),
     );
   }
 }
