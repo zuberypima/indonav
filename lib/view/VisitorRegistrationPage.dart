@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:email_validator/email_validator.dart';
+import 'package:geolocator/geolocator.dart' as gl;
 import 'package:indonav/view/CampasMapView.dart';
-import 'package:indonav/view/QRScannerPage.dart';
+import 'package:indonav/view/HomePage.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class VisitorRegistrationPage extends StatefulWidget {
   final Map<String, dynamic>? scannedDepartment;
@@ -28,12 +30,9 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
   @override
   void initState() {
     super.initState();
-    _nameController.clear();
-    _emailController.clear();
-    _purposeController.clear();
-    _hostController.clear();
     if (widget.scannedDepartment != null) {
       _selectedDepartmentId = widget.scannedDepartment!['departmentId'];
+      print('Scanned department: ${widget.scannedDepartment}');
     }
   }
 
@@ -46,14 +45,100 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
     super.dispose();
   }
 
+  Future<Map<String, dynamic>> _getVisitorLocation() async {
+    final status = await Permission.location.request();
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        throw Exception(
+          'Location permission permanently denied. Please enable in settings.',
+        );
+      }
+      throw Exception('Location permission denied');
+    }
+
+    if (!await gl.Geolocator.isLocationServiceEnabled()) {
+      throw Exception('Location services disabled');
+    }
+
+    final position = await gl.Geolocator.getCurrentPosition(
+      desiredAccuracy: gl.LocationAccuracy.high,
+    );
+
+    if (position.latitude < -90 ||
+        position.latitude > 90 ||
+        position.longitude < -180 ||
+        position.longitude > 180) {
+      throw Exception(
+        'Invalid visitor coordinates: (${position.latitude}, ${position.longitude})',
+      );
+    }
+
+    print(
+      'Visitor position: lat=${position.latitude}, lng=${position.longitude}',
+    );
+    return {'latitude': position.latitude, 'longitude': position.longitude};
+  }
+
   Future<void> _submitRegistration() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      print('Form validation failed');
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
     });
 
     try {
+      print(
+        'Starting registration submission for department: $_selectedDepartmentId',
+      );
+
+      // Fetch visitor's location
+      final visitorLocation = await _getVisitorLocation();
+      final visitorLat = visitorLocation['latitude'] as double;
+      final visitorLng = visitorLocation['longitude'] as double;
+
+      // Fetch department coordinates from Firestore
+      double? deptLat, deptLng;
+      final deptDoc =
+          await FirebaseFirestore.instance
+              .collection('departments')
+              .doc(_selectedDepartmentId)
+              .get();
+      if (!deptDoc.exists) {
+        throw Exception('Department not found: $_selectedDepartmentId');
+      }
+      final deptData = deptDoc.data()!;
+      deptLat = double.tryParse(deptData['latitude']?.toString() ?? '');
+      deptLng = double.tryParse(deptData['longitude']?.toString() ?? '');
+
+      // Validate department coordinates
+      if (deptLat == null ||
+          deptLng == null ||
+          !deptLat.isFinite ||
+          !deptLng.isFinite) {
+        throw Exception('Invalid department coordinates: ($deptLat, $deptLng)');
+      }
+      if (deptLat < -90 || deptLat > 90 || deptLng < -180 || deptLng > 180) {
+        throw Exception(
+          'Department coordinates out of range: ($deptLat, $deptLng)',
+        );
+      }
+
+      print('Department coordinates: lat=$deptLat, lng=$deptLng');
+
+      // Calculate distance
+      final distance = gl.Geolocator.distanceBetween(
+        visitorLat,
+        visitorLng,
+        deptLat,
+        deptLng,
+      );
+      print(
+        'Distance to department: ${(distance / 1000).toStringAsFixed(2)} km',
+      );
+
       // Save registration
       await FirebaseFirestore.instance.collection('visitor_registrations').add({
         'visitorName': _nameController.text,
@@ -61,55 +146,34 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
         'hostName': _useManualHost ? _hostController.text : _selectedHostId,
         'purpose': _purposeController.text,
         'departmentId': _selectedDepartmentId,
-        'campusLocationId': widget.scannedDepartment?['campusLocationId'] ?? '',
+        'campusLocationId': deptData['campusLocationId'] ?? '',
+        'visitorLatitude': visitorLat,
+        'visitorLongitude': visitorLng,
+        'departmentLatitude': deptLat,
+        'departmentLongitude': deptLng,
+        'distance': distance,
         'checkInTime': Timestamp.now(),
         'checkOutTime': null,
       });
 
-      // Fetch coordinates
-      double? latitude, longitude;
-      if (widget.scannedDepartment != null &&
-          widget.scannedDepartment!.containsKey('latitude') &&
-          widget.scannedDepartment!.containsKey('longitude')) {
-        latitude = double.tryParse(
-          widget.scannedDepartment!['latitude'].toString(),
-        );
-        longitude = double.tryParse(
-          widget.scannedDepartment!['longitude'].toString(),
-        );
-      } else {
-        final deptDoc =
-            await FirebaseFirestore.instance
-                .collection('departments')
-                .doc(_selectedDepartmentId)
-                .get();
-        if (deptDoc.exists) {
-          final data = deptDoc.data()!;
-          latitude = double.tryParse(data['latitude']?.toString() ?? '');
-          longitude = double.tryParse(data['longitude']?.toString() ?? '');
-        }
-      }
-
-      // Fallback coordinates
-      latitude ??= 33.416138;
-      longitude ??= -8.941800;
+      print('Registration saved successfully');
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Registration submitted successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
 
       // Navigate to CampasMapView
+      print(
+        'Navigating to CampasMapView with coordinates: visitor=($visitorLat, $visitorLng), target=($deptLat, $deptLng), distance=$distance',
+      );
       await Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder:
               (context) => CampasMapView(
-                targetLatitude: latitude!,
-                targetLongitude: longitude!,
+                targetLatitude: double.parse(deptLat.toString()),
+                targetLongitude: double.parse(deptLng.toString()),
+                visitorLatitude: visitorLat,
+                visitorLongitude: visitorLng,
+                distance: distance,
               ),
         ),
       );
@@ -117,13 +181,21 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to submit: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
       });
+      String errorMsg;
+      if (e.toString().contains('permission')) {
+        errorMsg = 'Location permission issue. Please enable in settings.';
+      } else if (e.toString().contains('coordinates')) {
+        errorMsg = 'Invalid location data. Please try again.';
+      } else if (e.toString().contains('Department not found')) {
+        errorMsg = 'Selected department not found.';
+      } else {
+        errorMsg = 'Failed to submit: ${e.toString()}';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
+      );
+      print('Registration error: $e');
     }
   }
 
@@ -137,10 +209,10 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            // Navigate back to QRScannerPage
+            print('Back button pressed, navigating to HomePage');
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => const QRScannerPage()),
+              MaterialPageRoute(builder: (context) => HomePage()),
             );
           },
         ),
@@ -162,6 +234,7 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                   ),
                   validator:
                       (value) => value!.isEmpty ? 'Name is required' : null,
+                  onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -178,108 +251,7 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                       return 'Enter a valid email';
                     return null;
                   },
-                ),
-                const SizedBox(height: 16),
-                StreamBuilder<QuerySnapshot>(
-                  key: ValueKey(_selectedDepartmentId),
-                  stream:
-                      _selectedDepartmentId != null
-                          ? FirebaseFirestore.instance
-                              .collection('hosts')
-                              .where(
-                                'departmentId',
-                                isEqualTo: _selectedDepartmentId,
-                              )
-                              .snapshots()
-                          : const Stream.empty(),
-                  builder: (context, snapshot) {
-                    if (_selectedDepartmentId == null) {
-                      return DropdownButtonFormField<String>(
-                        decoration: InputDecoration(
-                          labelText: 'Host',
-                          prefixIcon: Icon(Icons.person_outline),
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [],
-                        onChanged: null,
-                        hint: Text('Select a department first'),
-                        validator: (value) => 'Host is required',
-                      );
-                    }
-                    if (!snapshot.hasData) {
-                      return const CircularProgressIndicator();
-                    }
-                    final hosts = snapshot.data!.docs;
-                    if (hosts.isEmpty) {
-                      return Column(
-                        children: [
-                          TextFormField(
-                            controller: _hostController,
-                            decoration: const InputDecoration(
-                              labelText: 'Host Name (Manual Entry)',
-                              prefixIcon: Icon(Icons.person_outline),
-                              border: OutlineInputBorder(),
-                            ),
-                            validator:
-                                (value) =>
-                                    value!.isEmpty
-                                        ? 'Host name is required'
-                                        : null,
-                            onChanged: (value) {
-                              setState(() {
-                                _useManualHost = true;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'No hosts available for this department. Please enter manually.',
-                            style: TextStyle(color: Colors.grey, fontSize: 12),
-                          ),
-                        ],
-                      );
-                    }
-                    return DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(
-                        labelText: 'Host',
-                        prefixIcon: Icon(Icons.person_outline),
-                        border: OutlineInputBorder(),
-                      ),
-                      value: _selectedHostId,
-                      items:
-                          hosts.map((doc) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            return DropdownMenuItem<String>(
-                              value: doc.id,
-                              child: Text(data['name'] ?? 'Unknown'),
-                            );
-                          }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedHostId = value;
-                          _useManualHost = false;
-                        });
-                      },
-                      validator:
-                          (value) =>
-                              value == null && !_useManualHost
-                                  ? 'Host is required'
-                                  : null,
-                      hint: const Text('Select a host'),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _purposeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Purpose of Visit',
-                    prefixIcon: Icon(Icons.note),
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 2,
-                  validator:
-                      (value) => value!.isEmpty ? 'Purpose is required' : null,
+                  onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                 ),
                 const SizedBox(height: 16),
                 StreamBuilder<QuerySnapshot>(
@@ -327,6 +299,147 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                               : null,
                     );
                   },
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Text('Enter host manually:'),
+                    Switch(
+                      value: _useManualHost,
+                      onChanged:
+                          _selectedDepartmentId == null
+                              ? null
+                              : (value) {
+                                setState(() {
+                                  _useManualHost = value;
+                                  _selectedHostId = null;
+                                  _hostController.clear();
+                                });
+                              },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_useManualHost)
+                  TextFormField(
+                    controller: _hostController,
+                    decoration: const InputDecoration(
+                      labelText: 'Host Name (Manual Entry)',
+                      prefixIcon: Icon(Icons.person_outline),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator:
+                        (value) =>
+                            value!.isEmpty ? 'Host name is required' : null,
+                    onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
+                  )
+                else
+                  StreamBuilder<QuerySnapshot>(
+                    key: ValueKey(_selectedDepartmentId),
+                    stream:
+                        _selectedDepartmentId != null
+                            ? FirebaseFirestore.instance
+                                .collection('hosts')
+                                .where(
+                                  'departmentId',
+                                  isEqualTo: _selectedDepartmentId,
+                                )
+                                .snapshots()
+                            : const Stream.empty(),
+                    builder: (context, snapshot) {
+                      if (_selectedDepartmentId == null) {
+                        return DropdownButtonFormField<String>(
+                          decoration: const InputDecoration(
+                            labelText: 'Host',
+                            prefixIcon: Icon(Icons.person_outline),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: [],
+                          onChanged: null,
+                          hint: const Text('Select a department first'),
+                          validator: (value) => 'Host is required',
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const CircularProgressIndicator();
+                      }
+                      final hosts = snapshot.data!.docs;
+                      if (hosts.isEmpty) {
+                        return Column(
+                          children: [
+                            TextFormField(
+                              controller: _hostController,
+                              decoration: const InputDecoration(
+                                labelText: 'Host Name (Manual Entry)',
+                                prefixIcon: Icon(Icons.person_outline),
+                                border: OutlineInputBorder(),
+                              ),
+                              validator:
+                                  (value) =>
+                                      value!.isEmpty
+                                          ? 'Host name is required'
+                                          : null,
+                              onChanged: (value) {
+                                setState(() {
+                                  _useManualHost = true;
+                                });
+                              },
+                              onFieldSubmitted:
+                                  (_) => FocusScope.of(context).nextFocus(),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'No hosts available. Please enter manually or toggle manual entry.',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                      return DropdownButtonFormField<String>(
+                        decoration: const InputDecoration(
+                          labelText: 'Host',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        value: _selectedHostId,
+                        items:
+                            hosts.map((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              return DropdownMenuItem<String>(
+                                value: doc.id,
+                                child: Text(data['name'] ?? 'Unknown'),
+                              );
+                            }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedHostId = value;
+                            _useManualHost = false;
+                          });
+                        },
+                        validator:
+                            (value) =>
+                                value == null && !_useManualHost
+                                    ? 'Host is required'
+                                    : null,
+                        hint: const Text('Select a host'),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _purposeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Purpose of Visit',
+                    prefixIcon: Icon(Icons.note),
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                  validator:
+                      (value) => value!.isEmpty ? 'Purpose is required' : null,
+                  onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
                 ),
                 const SizedBox(height: 24),
                 Center(
