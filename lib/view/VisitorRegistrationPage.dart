@@ -212,7 +212,9 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
             print('Back button pressed, navigating to HomePage');
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => HomePage()),
+              MaterialPageRoute(
+                builder: (context) => HomePage(visitorName: ''),
+              ),
             );
           },
         ),

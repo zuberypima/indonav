@@ -4,7 +4,8 @@ import 'package:indonav/view/QRScannerPage.dart';
 import 'package:indonav/view/VisitorRegistrationPage.dart';
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  String visitorName;
+   HomePage({super.key, required this.visitorName});
 
   @override
   Widget build(BuildContext context) {

@@ -72,7 +72,7 @@ class _CampasMapViewState extends State<CampasMapView> {
             print('Back button pressed, navigating to HomePage');
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => const HomePage()),
+              MaterialPageRoute(builder: (context) =>  HomePage(visitorName: '',)),
             );
           },
         ),
@@ -326,7 +326,9 @@ class _CampasMapViewState extends State<CampasMapView> {
     }
 
     final url =
-        'https://api.mapbox.com/directions/v5/mapbox/walking/$startLng,$startLat;$endLng,$endLat?geometries=geojson&access_token=$accessToken';
+      'https://api.mapbox.com/directions/v5/mapbox/walking/$startLng,$startLat;$endLng,$endLat?geometries=geojson&access_token=$accessToken';
+            // 'https://api.mapbox.com/directions/v5/mapbox/walking/$startLng,$startLat;$endLng,$endLat?geometries=geojson&access_token=$accessToken';
+
 
     try {
       final response = await http
