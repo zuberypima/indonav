@@ -37,14 +37,14 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
       ),
       home:
-          // LoginPage(),
-          RegistrationPage(),
+      // LoginPage(),
+      // RegistrationPage(),
       // MapboxMapScreen(),
       // CampusMapScreen(),
       //  VisitorRegistrationPage(),
       //  Pointsmaps(),
       // CampasMapView(),
-      // HomePage(),
+      HomePage(visitorName: ''),
       // VisitorHomePage(),
     );
   }
