@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as gl;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mp;
 import 'package:permission_handler/permission_handler.dart';
@@ -39,13 +38,6 @@ class _CampasMapViewState extends State<CampasMapView> {
   @override
   void initState() {
     super.initState();
-    // Lock to landscape orientation
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    debugPrint('Screen orientation locked to landscape');
-
     _currentPosition = gl.Position(
       latitude: widget.visitorLatitude,
       longitude: widget.visitorLongitude,
@@ -63,16 +55,7 @@ class _CampasMapViewState extends State<CampasMapView> {
 
   @override
   void dispose() {
-    // Restore default orientation
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    debugPrint('Screen orientation restored to default');
-
     userPositionStream?.cancel();
-    mapboxMapController?.dispose();
     super.dispose();
   }
 
@@ -86,7 +69,7 @@ class _CampasMapViewState extends State<CampasMapView> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            debugPrint('Back button pressed, navigating to HomePage');
+            print('Back button pressed, navigating to HomePage');
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -115,7 +98,7 @@ class _CampasMapViewState extends State<CampasMapView> {
             mp.MapWidget(
               key: const ValueKey('mapWidget'),
               onMapCreated: _onMapCreated,
-              styleUri: 'mapbox://styles/mapbox/streets-v12',
+              styleUri: 'mapbox://styles/mapbox/satellite-streets-v12',
             )
           else
             const Center(
@@ -173,78 +156,58 @@ class _CampasMapViewState extends State<CampasMapView> {
       mapboxMapController = controller;
     });
 
-    debugPrint('Map created, initializing location and marker');
+    print('Map created, initializing location and marker');
 
-    try {
-      // Verify access token
-      final token = await mp.MapboxOptions.getAccessToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('Mapbox access token is missing or invalid');
-      }
-      debugPrint('Access token verified: $token');
+    // Enable user location
+    await mapboxMapController?.location.updateSettings(
+      mp.LocationComponentSettings(enabled: true, pulsingEnabled: true),
+    );
 
-      // Enable user location
-      await mapboxMapController?.location.updateSettings(
-        mp.LocationComponentSettings(enabled: true, pulsingEnabled: true),
-      );
-      debugPrint('Location component enabled');
-
-      // Center map on target coordinates
-      await mapboxMapController?.setCamera(
-        mp.CameraOptions(
-          center: mp.Point(
-            coordinates: mp.Position(
-              widget.targetLongitude,
-              widget.targetLatitude,
-            ),
+    // Center map on target coordinates
+    await mapboxMapController?.setCamera(
+      mp.CameraOptions(
+        center: mp.Point(
+          coordinates: mp.Position(
+            widget.targetLongitude,
+            widget.targetLatitude,
           ),
-          zoom: 15,
         ),
-      );
-      debugPrint(
-        'Camera set to: lng=${widget.targetLongitude}, lat=${widget.targetLatitude}, zoom=15',
-      );
+        zoom: 15,
+      ),
+    );
 
-      // Add marker for department
-      final pointAnnotationManager =
-          await mapboxMapController?.annotations.createPointAnnotationManager();
-      await pointAnnotationManager?.create(
-        mp.PointAnnotationOptions(
-          geometry: mp.Point(
-            coordinates: mp.Position(
-              widget.targetLongitude,
-              widget.targetLatitude,
-            ),
+    // Add marker for department
+    final pointAnnotationManager =
+        await mapboxMapController?.annotations.createPointAnnotationManager();
+    await pointAnnotationManager?.create(
+      mp.PointAnnotationOptions(
+        geometry: mp.Point(
+          coordinates: mp.Position(
+            widget.targetLongitude,
+            widget.targetLatitude,
           ),
-          iconImage: 'marker',
-          iconSize: 0.5,
         ),
-      );
-      debugPrint(
-        'Added department marker at (${widget.targetLatitude}, ${widget.targetLongitude})',
-      );
+        iconImage: 'marker',
+        iconSize: 0.5,
+      ),
+    );
+    print(
+      'Added department marker at (${widget.targetLatitude}, ${widget.targetLongitude})',
+    );
 
-      // Draw route if current position exists
-      if (_currentPosition != null) {
-        setState(() {
-          _isLoadingRoute = true;
-        });
-        await _fetchAndDrawRoute();
-      }
-    } catch (e) {
-      if (!mounted) return;
-      debugPrint('Map initialization error: $e');
+    // Draw route if current position exists
+    if (_currentPosition != null) {
       setState(() {
-        _isLoadingRoute = false;
-        _routeError = e.toString();
+        _isLoadingRoute = true;
       });
+      await _fetchAndDrawRoute();
     }
   }
 
   Future<void> _requestLocationPermission() async {
     final status = await Permission.location.request();
     if (status.isGranted) {
-      debugPrint('Location permission granted');
+      print('Location permission granted');
       await _setupPositionTracking();
     } else if (status.isDenied) {
       if (!mounted) return;
@@ -254,7 +217,7 @@ class _CampasMapViewState extends State<CampasMapView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Location permission denied');
+      print('Location permission denied');
     } else if (status.isPermanentlyDenied) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -265,7 +228,7 @@ class _CampasMapViewState extends State<CampasMapView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Location permission permanently denied');
+      print('Location permission permanently denied');
       await openAppSettings();
     }
   }
@@ -279,7 +242,7 @@ class _CampasMapViewState extends State<CampasMapView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Location services disabled');
+      print('Location services disabled');
       return;
     }
 
@@ -299,7 +262,7 @@ class _CampasMapViewState extends State<CampasMapView> {
           _currentPosition = position;
         });
 
-        debugPrint(
+        print(
           'Current position: lat=${position.latitude}, lng=${position.longitude}',
         );
 
@@ -316,16 +279,14 @@ class _CampasMapViewState extends State<CampasMapView> {
             backgroundColor: Colors.red,
           ),
         );
-        debugPrint('Location error: $e');
+        print('Location error: $e');
       },
     );
   }
 
   Future<void> _fetchAndDrawRoute() async {
     if (_currentPosition == null || mapboxMapController == null) {
-      debugPrint(
-        'No route drawn: _currentPosition or mapboxMapController is null',
-      );
+      print('No route drawn: _currentPosition or mapboxMapController is null');
       setState(() {
         _isLoadingRoute = false;
         _routeError = 'Map or location data unavailable';
@@ -342,7 +303,7 @@ class _CampasMapViewState extends State<CampasMapView> {
         !startLng.isFinite ||
         !endLat.isFinite ||
         !endLng.isFinite) {
-      debugPrint(
+      print(
         'Invalid coordinates: start=($startLat, $startLng), end=($endLat, $endLng)',
       );
       setState(() {
@@ -352,13 +313,13 @@ class _CampasMapViewState extends State<CampasMapView> {
       return;
     }
 
-    debugPrint(
+    print(
       'Fetching route: start=($startLat, $startLng), end=($endLat, $endLng)',
     );
 
     final accessToken = await mp.MapboxOptions.getAccessToken();
     if (accessToken == null || accessToken.isEmpty) {
-      debugPrint('Mapbox access token is missing');
+      print('Mapbox access token is missing');
       setState(() {
         _isLoadingRoute = false;
         _routeError = 'Mapbox access token missing';
@@ -372,7 +333,7 @@ class _CampasMapViewState extends State<CampasMapView> {
       final response = await http
           .get(Uri.parse(url))
           .timeout(const Duration(seconds: 10));
-      debugPrint('Mapbox API response status: ${response.statusCode}');
+      print('Mapbox API response status: ${response.statusCode}');
       if (response.statusCode != 200) {
         throw Exception(
           'Failed to fetch route: ${response.statusCode} - ${response.body}',
@@ -380,7 +341,7 @@ class _CampasMapViewState extends State<CampasMapView> {
       }
 
       final data = jsonDecode(response.body);
-      debugPrint('Mapbox response: ${response.body}');
+      print('Mapbox response: ${response.body}');
       if (data['routes'] == null || data['routes'].isEmpty) {
         throw Exception(
           'No routes found: ${data['message'] ?? 'Unknown error'}',
@@ -393,21 +354,21 @@ class _CampasMapViewState extends State<CampasMapView> {
               .map((coord) => mp.Position(coord[0], coord[1]))
               .toList();
 
-      debugPrint('Route coordinates: ${coordinates.length} points');
+      print('Route coordinates: ${coordinates.length} points');
 
       // Remove existing route layer and source if present
       if (_routeLayerId != null) {
         try {
           await mapboxMapController?.style.removeStyleLayer(_routeLayerId!);
-          debugPrint('Removed existing route layer: $_routeLayerId');
+          print('Removed existing route layer: $_routeLayerId');
         } catch (e) {
-          debugPrint('Failed to remove route layer $_routeLayerId: $e');
+          print('Failed to remove route layer $_routeLayerId: $e');
         }
         try {
           await mapboxMapController?.style.removeStyleSource('route-source');
-          debugPrint('Removed existing route source: route-source');
+          print('Removed existing route source: route-source');
         } catch (e) {
-          debugPrint('Failed to remove route source: $e');
+          print('Failed to remove route source: $e');
         }
       }
 
@@ -426,7 +387,7 @@ class _CampasMapViewState extends State<CampasMapView> {
         'route-source',
         jsonEncode(sourceData),
       );
-      debugPrint('Added route source: route-source');
+      print('Added route source: route-source');
 
       // Add route layer
       _routeLayerId = 'route-layer-${DateTime.now().millisecondsSinceEpoch}';
@@ -434,9 +395,8 @@ class _CampasMapViewState extends State<CampasMapView> {
         'id': _routeLayerId!,
         'type': 'line',
         'source': 'route-source',
-        'layout': {'line-cap': 'round', 'line-join': 'round'},
         'paint': {
-          'line-color': '#FF4500', // Deep orange
+          'line-color': 'rgb(255, 69, 0)', // Deep orange
           'line-width': 5.0,
           'line-opacity': 0.8,
         },
@@ -445,7 +405,7 @@ class _CampasMapViewState extends State<CampasMapView> {
         jsonEncode(layerData),
         null,
       );
-      debugPrint('Route layer added: $_routeLayerId');
+      print('Route layer added: $_routeLayerId');
 
       setState(() {
         _isLoadingRoute = false;
@@ -453,7 +413,7 @@ class _CampasMapViewState extends State<CampasMapView> {
       });
     } catch (e) {
       if (!mounted) return;
-      debugPrint('Route error: $e');
+      print('Route error: $e');
       setState(() {
         _isLoadingRoute = false;
         _routeError = e.toString();

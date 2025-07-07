@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:indonav/view/CampasMapView.dart';
 import 'package:indonav/view/CampusMapScreen.dart';
+import 'package:indonav/view/CampusViewPage.dart';
 import 'package:indonav/view/HomePage.dart';
 import 'package:indonav/view/MapboxMapScreen.dart';
 import 'package:indonav/view/PointsMaps.dart';
@@ -37,14 +38,16 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
       ),
       home:
+      //  CampusViewPage(),
       // LoginPage(),
       // RegistrationPage(),
       // MapboxMapScreen(),
-      // CampusMapScreen(),
+      //  CampusMapScreen(),
       //  VisitorRegistrationPage(),
       //  Pointsmaps(),
       // CampasMapView(),
       HomePage(visitorName: ''),
+
       // VisitorHomePage(),
     );
   }
