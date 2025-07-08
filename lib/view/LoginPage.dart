@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:email_validator/email_validator.dart';
 import 'package:geolocator/geolocator.dart' as gl;
 import 'package:indonav/view/RegistrationPage.dart';
+import 'package:indonav/view/HomePage.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class LoginPage extends StatefulWidget {
@@ -55,7 +56,7 @@ class _LoginPageState extends State<LoginPage> {
       );
     }
 
-    print(
+    debugPrint(
       'Visitor position: lat=${position.latitude}, lng=${position.longitude}',
     );
     return {'latitude': position.latitude, 'longitude': position.longitude};
@@ -63,7 +64,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _submitLogin() async {
     if (!_formKey.currentState!.validate()) {
-      print('Form validation failed');
+      debugPrint('Form validation failed');
       return;
     }
 
@@ -72,7 +73,7 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      print('Starting login submission');
+      debugPrint('Starting login submission');
 
       // Sign in with Firebase Authentication
       final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -100,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
         'checkOutTime': null,
       });
 
-      print('Login and check-in saved successfully for user: $userId');
+      debugPrint('Login and check-in saved successfully for user: $userId');
 
       if (!mounted) return;
 
@@ -119,9 +120,12 @@ class _LoginPageState extends State<LoginPage> {
         _isSubmitting = false;
       });
 
-      // Placeholder for post-login navigation
-      // Uncomment and replace with actual page if exists:
-      // Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomePage()));
+      // Navigate to HomePage
+      debugPrint('Navigating to HomePage');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => HomePage(visitorName: '')),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -158,7 +162,7 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
-      print('Login error: $e');
+      debugPrint('Login error: $e');
     }
   }
 
@@ -179,7 +183,9 @@ class _LoginPageState extends State<LoginPage> {
                 ? IconButton(
                   icon: const Icon(Icons.arrow_back),
                   onPressed: () {
-                    print('Back button pressed, navigating to previous page');
+                    debugPrint(
+                      'Back button pressed, navigating to previous page',
+                    );
                     Navigator.pop(context);
                   },
                 )
@@ -289,9 +295,7 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 30),
                   Center(
                     child: SizedBox(
-                      width:
-                          MediaQuery.of(context).size.width *
-                          0.9, // Responsive width
+                      width: MediaQuery.of(context).size.width * 0.9,
                       child: ElevatedButton(
                         onPressed: _isSubmitting ? null : _submitLogin,
                         style: ElevatedButton.styleFrom(
@@ -331,7 +335,7 @@ class _LoginPageState extends State<LoginPage> {
                   Center(
                     child: TextButton(
                       onPressed: () {
-                        print('Sign Up button pressed');
+                        debugPrint('Sign Up button pressed');
                         Navigator.push(
                           context,
                           MaterialPageRoute(

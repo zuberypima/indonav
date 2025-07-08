@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:email_validator/email_validator.dart';
+import 'package:geolocator/geolocator.dart' as gl;
 import 'package:indonav/view/HomePage.dart';
 import 'package:indonav/view/loginpage.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class RegistrationPage extends StatefulWidget {
   const RegistrationPage({super.key});
@@ -30,9 +32,34 @@ class _RegistrationPageState extends State<RegistrationPage> {
     super.dispose();
   }
 
+  Future<Map<String, dynamic>> _getVisitorLocation() async {
+    final status = await Permission.location.request();
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        throw Exception('Location permission permanently denied. Please enable in settings.');
+      }
+      throw Exception('Location permission denied');
+    }
+
+    if (!await gl.Geolocator.isLocationServiceEnabled()) {
+      throw Exception('Location services disabled');
+    }
+
+    final position = await gl.Geolocator.getCurrentPosition(
+      desiredAccuracy: gl.LocationAccuracy.high,
+    );
+
+    if (position.latitude < -90 || position.latitude > 90 || position.longitude < -180 || position.longitude > 180) {
+      throw Exception('Invalid visitor coordinates: (${position.latitude}, ${position.longitude})');
+    }
+
+    print('Visitor position: lat=${position.latitude}, lng=${position.longitude}');
+    return {'latitude': position.latitude, 'longitude': position.longitude};
+  }
+
   Future<void> _submitRegistration() async {
     if (!_formKey.currentState!.validate()) {
-      debugPrint('Form validation failed');
+      print('Form validation failed');
       return;
     }
 
@@ -41,31 +68,37 @@ class _RegistrationPageState extends State<RegistrationPage> {
     });
 
     try {
-      debugPrint('Starting registration submission');
+      print('Starting registration submission');
 
       // Create user with Firebase Authentication
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          );
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
       final userId = credential.user?.uid;
 
       if (userId == null) {
         throw Exception('Failed to create user account');
       }
 
-      // Save registration to Firestore using email as document ID
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_emailController.text.trim())
-          .set({
-            'visitorName': _nameController.text.trim(),
-            'email': _emailController.text.trim(),
-            'phoneNumber': _phoneController.text.trim(),
-          });
+      // Fetch visitor's location
+      final visitorLocation = await _getVisitorLocation();
+      final visitorLat = visitorLocation['latitude'] as double;
+      final visitorLng = visitorLocation['longitude'] as double;
 
-      debugPrint('Registration saved successfully for user: $userId');
+      // Save registration to Firestore
+      await FirebaseFirestore.instance.collection('visitor_registrations').add({
+        'visitorName': _nameController.text,
+        'email': _emailController.text,
+        'phoneNumber': _phoneController.text,
+        'visitorLatitude': visitorLat,
+        'visitorLongitude': visitorLng,
+        'userId': userId,
+        'checkInTime': Timestamp.now(),
+        'checkOutTime': null,
+      });
+
+      print('Registration saved successfully for user: $userId');
 
       if (!mounted) return;
 
@@ -91,8 +124,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder:
-                (context) => HomePage(visitorName: _nameController.text.trim()),
+            builder: (context) => HomePage(visitorName: _nameController.text),
           ),
         );
       }
@@ -102,7 +134,14 @@ class _RegistrationPageState extends State<RegistrationPage> {
         _isSubmitting = false;
       });
       String errorMsg;
-      if (e is FirebaseAuthException) {
+      if (e.toString().contains('permission')) {
+        errorMsg = 'Location permission issue. Please enable in settings.';
+        if (e.toString().contains('permanently denied')) {
+          await openAppSettings();
+        }
+      } else if (e.toString().contains('coordinates')) {
+        errorMsg = 'Invalid location data. Please try again.';
+      } else if (e is FirebaseAuthException) {
         switch (e.code) {
           case 'email-already-in-use':
             errorMsg = 'The email address is already in use.';
@@ -122,7 +161,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
-      debugPrint('Registration error: $e');
+      print('Registration error: $e');
     }
   }
 
@@ -138,18 +177,15 @@ class _RegistrationPageState extends State<RegistrationPage> {
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
-        leading:
-            Navigator.canPop(context)
-                ? IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: () {
-                    debugPrint(
-                      'Back button pressed, navigating to previous page',
-                    );
-                    Navigator.pop(context);
-                  },
-                )
-                : null,
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () {
+                  print('Back button pressed, navigating to previous page');
+                  Navigator.pop(context);
+                },
+              )
+            : null,
       ),
       body: Container(
         decoration: BoxDecoration(
@@ -206,11 +242,8 @@ class _RegistrationPageState extends State<RegistrationPage> {
                               filled: true,
                               fillColor: Colors.grey.shade50,
                             ),
-                            validator:
-                                (value) =>
-                                    value!.isEmpty ? 'Name is required' : null,
-                            onFieldSubmitted:
-                                (_) => FocusScope.of(context).nextFocus(),
+                            validator: (value) => value!.isEmpty ? 'Name is required' : null,
+                            onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
@@ -227,12 +260,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
                             keyboardType: TextInputType.emailAddress,
                             validator: (value) {
                               if (value!.isEmpty) return 'Email is required';
-                              if (!EmailValidator.validate(value))
-                                return 'Enter a valid email';
+                              if (!EmailValidator.validate(value)) return 'Enter a valid email';
                               return null;
                             },
-                            onFieldSubmitted:
-                                (_) => FocusScope.of(context).nextFocus(),
+                            onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
@@ -249,15 +280,13 @@ class _RegistrationPageState extends State<RegistrationPage> {
                             ),
                             keyboardType: TextInputType.phone,
                             validator: (value) {
-                              if (value!.isEmpty)
-                                return 'Phone number is required';
+                              if (value!.isEmpty) return 'Phone number is required';
                               if (!RegExp(r'^07[0-9]{8}$').hasMatch(value)) {
                                 return 'Enter a valid phone number (e.g., 0788907890)';
                               }
                               return null;
                             },
-                            onFieldSubmitted:
-                                (_) => FocusScope.of(context).nextFocus(),
+                            onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
@@ -272,9 +301,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
                               fillColor: Colors.grey.shade50,
                               suffixIcon: IconButton(
                                 icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
+                                  _obscurePassword ? Icons.visibility : Icons.visibility_off,
                                 ),
                                 onPressed: () {
                                   setState(() {
@@ -286,12 +313,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
                             obscureText: _obscurePassword,
                             validator: (value) {
                               if (value!.isEmpty) return 'Password is required';
-                              if (value.length < 6)
-                                return 'Password must be at least 6 characters';
+                              if (value.length < 6) return 'Password must be at least 6 characters';
                               return null;
                             },
-                            onFieldSubmitted:
-                                (_) => FocusScope.of(context).unfocus(),
+                            onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
                           ),
                         ],
                       ),
@@ -300,39 +325,35 @@ class _RegistrationPageState extends State<RegistrationPage> {
                   const SizedBox(height: 30),
                   Center(
                     child: SizedBox(
-                      width: MediaQuery.of(context).size.width * 0.9,
+                      width: MediaQuery.of(context).size.width * 0.9, // Responsive width
                       child: ElevatedButton(
                         onPressed: _isSubmitting ? null : _submitRegistration,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.deepOrange,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
-                            vertical: 16,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 5,
                           shadowColor: Colors.deepOrange.withOpacity(0.4),
                         ),
-                        child:
-                            _isSubmitting
-                                ? const SizedBox(
-                                  height: 24,
-                                  width: 24,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 3,
-                                  ),
-                                )
-                                : const Text(
-                                  'REGISTER NOW',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                height: 24,
+                                width: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 3,
                                 ),
+                              )
+                            : const Text(
+                                'REGISTER NOW',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                   ),
@@ -340,16 +361,14 @@ class _RegistrationPageState extends State<RegistrationPage> {
                   Center(
                     child: TextButton(
                       onPressed: () {
-                        debugPrint('Sign In button pressed');
+                        print('Sign In button pressed');
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => const LoginPage(),
-                          ),
+                          MaterialPageRoute(builder: (context) =>  LoginPage()),
                         );
                       },
-                      child: RichText(
-                        text: const TextSpan(
+                      child:  RichText(
+                        text: TextSpan(
                           text: 'Already have an account? ',
                           style: TextStyle(color: Colors.grey),
                           children: [

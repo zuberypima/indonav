@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:email_validator/email_validator.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart' as gl;
 import 'package:indonav/view/CampasMapView.dart';
 import 'package:indonav/view/HomePage.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:intl/intl.dart';
 
 class VisitorRegistrationPage extends StatefulWidget {
   final Map<String, dynamic>? scannedDepartment;
@@ -25,72 +23,16 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
   final _purposeController = TextEditingController();
   final _hostController = TextEditingController();
   String? _selectedDepartmentId;
-  String? _selectedDepartmentName;
   String? _selectedHostId;
   bool _isSubmitting = false;
   bool _useManualHost = false;
-  DateTime? _registrationDate;
-
-  final DateFormat _dateFormat = DateFormat('MMM dd, yyyy hh:mm a');
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    _registrationDate =
-        DateTime.now(); // Auto-set to current time (11:33 PM EAT, July 08, 2025)
-    _fetchUserDetails();
     if (widget.scannedDepartment != null) {
       _selectedDepartmentId = widget.scannedDepartment!['departmentId'];
-      _selectedDepartmentName = widget.scannedDepartment!['name'];
       print('Scanned department: ${widget.scannedDepartment}');
-    }
-  }
-
-  Future<void> _fetchUserDetails() async {
-    try {
-      final User? user = _auth.currentUser;
-      if (user != null) {
-        final email = user.email;
-        if (email != null) {
-          final userDoc =
-              await _firestore
-                  .collection('users')
-                  .where('email', isEqualTo: email)
-                  .limit(1)
-                  .get();
-          if (userDoc.docs.isNotEmpty) {
-            final userData = userDoc.docs.first.data() as Map<String, dynamic>;
-            setState(() {
-              _emailController.text = userData['email'] ?? email;
-              _nameController.text = userData['visitorName'] ?? 'Unknown User';
-            });
-          } else {
-            setState(() {
-              _emailController.text = email;
-              _nameController.text = 'Unknown User';
-            });
-          }
-        }
-      } else {
-        setState(() {
-          _nameController.text = 'Guest User';
-          _emailController.text = 'guest@example.com';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please log in to use your details.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _nameController.text = 'Guest User';
-        _emailController.text = 'guest@example.com';
-      });
-      print('Error fetching user details: $e');
     }
   }
 
@@ -160,7 +102,7 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
       // Fetch department coordinates from Firestore
       double? deptLat, deptLng;
       final deptDoc =
-          await _firestore
+          await FirebaseFirestore.instance
               .collection('departments')
               .doc(_selectedDepartmentId)
               .get();
@@ -197,35 +139,28 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
         'Distance to department: ${(distance / 1000).toStringAsFixed(2)} km',
       );
 
-      // Prepare registration data with check-in time
-      final registrationData = {
+      // Save registration
+      await FirebaseFirestore.instance.collection('visitor_registrations').add({
         'visitorName': _nameController.text,
         'email': _emailController.text,
         'hostName': _useManualHost ? _hostController.text : _selectedHostId,
         'purpose': _purposeController.text,
         'departmentId': _selectedDepartmentId,
-        'departmentName': _selectedDepartmentName ?? deptData['name'],
         'campusLocationId': deptData['campusLocationId'] ?? '',
         'visitorLatitude': visitorLat,
         'visitorLongitude': visitorLng,
         'departmentLatitude': deptLat,
         'departmentLongitude': deptLng,
         'distance': distance,
-        'registrationDate': Timestamp.fromDate(_registrationDate!),
-        'checkInTime': Timestamp.fromDate(_registrationDate!),
+        'checkInTime': Timestamp.now(),
         'checkOutTime': null,
-        'status': 'active',
-      };
+      });
 
-      // Save registration
-      final docRef = await _firestore
-          .collection('visitor_registrations')
-          .add(registrationData);
-      print('Registration saved successfully with ID: ${docRef.id}');
+      print('Registration saved successfully');
 
       if (!mounted) return;
 
-      // Navigate to CampasMapView after check-in
+      // Navigate to CampasMapView
       print(
         'Navigating to CampasMapView with coordinates: visitor=($visitorLat, $visitorLng), target=($deptLat, $deptLng), distance=$distance',
       );
@@ -292,40 +227,12 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Registration Date
-                Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Registration Details',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Registration Date: ${_dateFormat.format(_registrationDate!)}',
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Visitor Information
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
                     labelText: 'Full Name',
                     prefixIcon: Icon(Icons.person),
                     border: OutlineInputBorder(),
-                    hintText: 'Fetched from user profile (edit if needed)',
                   ),
                   validator:
                       (value) => value!.isEmpty ? 'Name is required' : null,
@@ -338,7 +245,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                     labelText: 'Email',
                     prefixIcon: Icon(Icons.email),
                     border: OutlineInputBorder(),
-                    hintText: 'Fetched from user profile (edit if needed)',
                   ),
                   keyboardType: TextInputType.emailAddress,
                   validator: (value) {
@@ -350,8 +256,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                   onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                 ),
                 const SizedBox(height: 16),
-
-                // Department Selection
                 StreamBuilder<QuerySnapshot>(
                   stream:
                       FirebaseFirestore.instance
@@ -382,9 +286,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                               ? (value) {
                                 setState(() {
                                   _selectedDepartmentId = value;
-                                  _selectedDepartmentName = departments
-                                      .firstWhere((doc) => doc.id == value)
-                                      .get('name');
                                   _selectedHostId = null;
                                   _useManualHost = false;
                                   _hostController.clear();
@@ -402,8 +303,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                   },
                 ),
                 const SizedBox(height: 16),
-
-                // Host Selection
                 Row(
                   children: [
                     const Text('Enter host manually:'),
@@ -532,8 +431,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                     },
                   ),
                 const SizedBox(height: 16),
-
-                // Purpose of Visit
                 TextFormField(
                   controller: _purposeController,
                   decoration: const InputDecoration(
@@ -547,8 +444,6 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                   onFieldSubmitted: (_) => FocusScope.of(context).unfocus(),
                 ),
                 const SizedBox(height: 24),
-
-                // Submit Button
                 Center(
                   child: ElevatedButton(
                     onPressed: _isSubmitting ? null : _submitRegistration,
@@ -568,7 +463,7 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
                               color: Colors.white,
                             )
                             : const Text(
-                              'Register Visit',
+                              'Submit',
                               style: TextStyle(
                                 fontSize: 18,
                                 color: Colors.white,

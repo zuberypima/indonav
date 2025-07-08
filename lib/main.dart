@@ -1,15 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:indonav/view/CampasMapView.dart';
 import 'package:indonav/view/CampusMapScreen.dart';
 import 'package:indonav/view/CampusViewPage.dart';
 import 'package:indonav/view/HomePage.dart';
-import 'package:indonav/view/MapboxMapScreen.dart';
-import 'package:indonav/view/PointsMaps.dart';
-import 'package:indonav/view/RegistrationPage.dart';
-import 'package:indonav/view/VisitorHomePage.dart';
-import 'package:indonav/view/VisitorRegistrationPage.dart';
 import 'package:indonav/view/loginpage.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
@@ -21,8 +16,8 @@ void main() async {
     print('Error initializing Firebase: $e');
   }
   MapboxOptions.setAccessToken(
-    // 'pk.eyJ1IjoicGltYXRlY2giLCJhIjoiY21iYWpvOWRlMDYwajJsc2F5MngwZjJ5aiJ9.ESREiHBRgbEpEuf2qR3rhA',
-    'pk.eyJ1IjoicGltYXRlY2giLCJhIjoiY21jbWc0YWRtMDI1bTJpc2VzNzF5djBucyJ9.vHTjfBLCIYT7opZOHkXqAg',
+    // 'pk.eyJ1IjoicGltYXRlY2giLCJhIjoiY21jbWc0YWRtMDI1bTJpc2VzNzF5djBucyJ9.vHTjfBLCIYT7opZOHkXqAg',
+    'AIzaSyBOpRefK-45E8lUfGUaicXtSklxLA-XWaY',
   );
   runApp(const MyApp());
 }
@@ -37,18 +32,32 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
       ),
-      home:
-      //  CampusViewPage(),
-      // LoginPage(),
-      // RegistrationPage(),
-      // MapboxMapScreen(),
-      //  CampusMapScreen(),
-      //  VisitorRegistrationPage(),
-      //  Pointsmaps(),
-      // CampasMapView(),
-      HomePage(visitorName: ''),
-
-      // VisitorHomePage(),
+      home: FutureBuilder(
+        future: Firebase.initializeApp(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done) {
+            return StreamBuilder<User?>(
+              stream: FirebaseAuth.instance.authStateChanges(),
+              builder: (context, authSnapshot) {
+                if (authSnapshot.connectionState == ConnectionState.active) {
+                  final User? user = authSnapshot.data;
+                  if (user != null) {
+                    // User is signed in, navigate to VisitorHomePage
+                    return HomePage(visitorName: '');
+                  } else {
+                    // User is not signed in, navigate to LoginPage
+                    return LoginPage();
+                  }
+                }
+                // Show loading while checking auth state
+                return const Center(child: CircularProgressIndicator());
+              },
+            );
+          }
+          // Show loading while Firebase initializes
+          return const Center(child: CircularProgressIndicator());
+        },
+      ),
     );
   }
 }
