@@ -6,6 +6,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:indonav/view/HomePage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class CampasMapView extends StatefulWidget {
   final double targetLatitude;
@@ -38,13 +40,10 @@ class _CampasMapViewState extends State<CampasMapView> {
   @override
   void initState() {
     super.initState();
-    // Lock to landscape orientation
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    debugPrint('Screen orientation locked to landscape');
-
     _currentPosition = gl.Position(
       latitude: widget.visitorLatitude,
       longitude: widget.visitorLongitude,
@@ -62,14 +61,11 @@ class _CampasMapViewState extends State<CampasMapView> {
 
   @override
   void dispose() {
-    // Restore default orientation
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    debugPrint('Screen orientation restored to default');
-
     userPositionStream?.cancel();
     _googleMapController?.dispose();
     super.dispose();
@@ -85,7 +81,6 @@ class _CampasMapViewState extends State<CampasMapView> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            debugPrint('Back button pressed, navigating to HomePage');
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -105,26 +100,27 @@ class _CampasMapViewState extends State<CampasMapView> {
           ),
         ),
       ),
-      body: widget.targetLatitude.isFinite &&
-              widget.targetLongitude.isFinite &&
-              widget.visitorLatitude.isFinite &&
-              widget.visitorLongitude.isFinite
-          ? GoogleMap(
-              onMapCreated: _onMapCreated,
-              initialCameraPosition: CameraPosition(
-                target: LatLng(widget.targetLatitude, widget.targetLongitude),
-                zoom: 15,
+      body:
+          widget.targetLatitude.isFinite &&
+                  widget.targetLongitude.isFinite &&
+                  widget.visitorLatitude.isFinite &&
+                  widget.visitorLongitude.isFinite
+              ? GoogleMap(
+                onMapCreated: _onMapCreated,
+                initialCameraPosition: CameraPosition(
+                  target: LatLng(widget.targetLatitude, widget.targetLongitude),
+                  zoom: 15,
+                ),
+                markers: _markers,
+                polylines: _path != null ? {_path!} : <Polyline>{},
+                mapType: MapType.normal,
+              )
+              : const Center(
+                child: Text(
+                  'Invalid coordinates. Please try again.',
+                  style: TextStyle(fontSize: 16, color: Colors.red),
+                ),
               ),
-              markers: _markers,
-              polylines: _path != null ? {_path!} : <Polyline>{},
-              mapType: MapType.normal,
-            )
-          : const Center(
-              child: Text(
-                'Invalid coordinates. Please try again.',
-                style: TextStyle(fontSize: 16, color: Colors.red),
-              ),
-            ),
     );
   }
 
@@ -133,37 +129,23 @@ class _CampasMapViewState extends State<CampasMapView> {
       _googleMapController = controller;
     });
 
-    debugPrint('Map created, initializing markers and path');
-
     try {
       // Fetch department name from Firestore
-      final deptQuery = await FirebaseFirestore.instance
-          .collection('departments')
-          .where('latitude', isEqualTo: widget.targetLatitude.toString())
-          .where('longitude', isEqualTo: widget.targetLongitude.toString())
-          .limit(1)
-          .get();
+      final deptQuery =
+          await FirebaseFirestore.instance
+              .collection('departments')
+              .where('latitude', isEqualTo: widget.targetLatitude.toString())
+              .where('longitude', isEqualTo: widget.targetLongitude.toString())
+              .limit(1)
+              .get();
       if (deptQuery.docs.isNotEmpty) {
         _departmentName =
             deptQuery.docs.first.data()['name'] ?? 'Unknown Department';
-        debugPrint('Department name fetched: $_departmentName');
       } else {
         _departmentName = 'Unknown Department';
-        debugPrint(
-          'No department found for coordinates: (${widget.targetLatitude}, ${widget.targetLongitude})',
-        );
       }
 
-      // Validate coordinates before adding markers
-      if (!widget.visitorLatitude.isFinite ||
-          !widget.visitorLongitude.isFinite ||
-          !widget.targetLatitude.isFinite ||
-          !widget.targetLongitude.isFinite) {
-        debugPrint('Invalid coordinates detected');
-        return;
-      }
-
-      // Add visitor marker
+      // Add markers
       _markers.add(
         Marker(
           markerId: const MarkerId('visitor'),
@@ -172,11 +154,6 @@ class _CampasMapViewState extends State<CampasMapView> {
           infoWindow: const InfoWindow(title: 'You are here'),
         ),
       );
-      debugPrint(
-        'Added visitor marker at (${widget.visitorLatitude}, ${widget.visitorLongitude})',
-      );
-
-      // Add department marker
       _markers.add(
         Marker(
           markerId: const MarkerId('department'),
@@ -185,23 +162,22 @@ class _CampasMapViewState extends State<CampasMapView> {
           infoWindow: InfoWindow(title: _departmentName ?? 'Department'),
         ),
       );
-      debugPrint(
-        'Added department marker at (${widget.targetLatitude}, ${widget.targetLongitude})',
-      );
 
-      // Add initial path
-      _path = Polyline(
-        polylineId: const PolylineId('path'),
-        points: [
-          LatLng(widget.visitorLatitude, widget.visitorLongitude),
-          LatLng(widget.targetLatitude, widget.targetLongitude),
-        ],
-        color: Colors.green,
-        width: 3,
-      );
-      setState(() {});
+      // Fetch initial directions
+      final origin = LatLng(widget.visitorLatitude, widget.visitorLongitude);
+      final destination = LatLng(widget.targetLatitude, widget.targetLongitude);
+      final points = await fetchDirections(origin, destination);
+      if (points.isNotEmpty) {
+        _path = Polyline(
+          polylineId: const PolylineId('path'),
+          points: points,
+          color: Colors.green,
+          width: 3,
+        );
+        setState(() {});
+      }
 
-      // Update path when visitor location changes
+      // Update path dynamically
       userPositionStream?.onData((gl.Position position) {
         if (!mounted || _googleMapController == null) return;
         setState(() {
@@ -211,27 +187,32 @@ class _CampasMapViewState extends State<CampasMapView> {
             Marker(
               markerId: const MarkerId('visitor'),
               position: LatLng(position.latitude, position.longitude),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueBlue,
+              ),
               infoWindow: const InfoWindow(title: 'You are here'),
             ),
           );
-          _path = Polyline(
-            polylineId: const PolylineId('path'),
-            points: [
-              LatLng(position.latitude, position.longitude),
-              LatLng(widget.targetLatitude, widget.targetLongitude),
-            ],
-            color: Colors.green,
-            width: 3,
-          );
         });
-        debugPrint(
-          'Updated path to: visitor (${position.latitude}, ${position.longitude}), department (${widget.targetLatitude}, ${widget.targetLongitude})',
-        );
+
+        fetchDirections(
+          LatLng(position.latitude, position.longitude),
+          destination,
+        ).then((newPoints) {
+          if (newPoints.isNotEmpty) {
+            setState(() {
+              _path = Polyline(
+                polylineId: const PolylineId('path'),
+                points: newPoints,
+                color: Colors.green,
+                width: 3,
+              );
+            });
+          }
+        });
       });
     } catch (e) {
       if (!mounted) return;
-      debugPrint('Map initialization error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Map initialization error: $e'),
@@ -241,31 +222,61 @@ class _CampasMapViewState extends State<CampasMapView> {
     }
   }
 
+  Future<List<LatLng>> fetchDirections(
+    LatLng origin,
+    LatLng destination,
+  ) async {
+    const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY'; // Replace with your API key
+    final url =
+        'https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=$apiKey';
+
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final routes = data['routes'] as List;
+      if (routes.isNotEmpty) {
+        final points = routes[0]['overview_polyline']['points'];
+        return decodePolyline(points);
+      }
+    }
+    return [];
+  }
+
+  List<LatLng> decodePolyline(String encoded) {
+    List<LatLng> points = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int b, shift = 0, result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      points.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+    return points;
+  }
+
   Future<void> _requestLocationPermission() async {
     final status = await Permission.location.request();
     if (status.isGranted) {
-      debugPrint('Location permission granted');
       await _setupPositionTracking();
-    } else if (status.isDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Location permission denied'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      debugPrint('Location permission denied');
     } else if (status.isPermanentlyDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Location permission permanently denied. Please enable in settings.',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-      debugPrint('Location permission permanently denied');
       await openAppSettings();
     }
   }
@@ -279,7 +290,6 @@ class _CampasMapViewState extends State<CampasMapView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Location services disabled');
       return;
     }
 
@@ -291,28 +301,11 @@ class _CampasMapViewState extends State<CampasMapView> {
     userPositionStream?.cancel();
     userPositionStream = gl.Geolocator.getPositionStream(
       locationSettings: locationSettings,
-    ).listen(
-      (gl.Position position) {
-        if (!mounted || _googleMapController == null) return;
-
-        setState(() {
-          _currentPosition = position;
-        });
-
-        debugPrint(
-          'Current position: lat=${position.latitude}, lng=${position.longitude}',
-        );
-      },
-      onError: (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Location error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        debugPrint('Location error: $e');
-      },
-    );
+    ).listen((gl.Position position) {
+      if (!mounted || _googleMapController == null) return;
+      setState(() {
+        _currentPosition = position;
+      });
+    });
   }
 }
