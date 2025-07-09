@@ -168,12 +168,12 @@ class _VisitorRegistrationPageState extends State<VisitorRegistrationPage> {
         context,
         MaterialPageRoute(
           builder:
-              (context) => CampasMapView(
+              (context) => CampusMapView(
                 targetLatitude: double.parse(deptLat.toString()),
                 targetLongitude: double.parse(deptLng.toString()),
                 visitorLatitude: visitorLat,
                 visitorLongitude: visitorLng,
-                distance: distance,
+                // distance: distance,
               ),
         ),
       );

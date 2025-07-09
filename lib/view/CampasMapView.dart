@@ -9,33 +9,31 @@ import 'package:indonav/view/HomePage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-class CampasMapView extends StatefulWidget {
+class CampusMapView extends StatefulWidget {
   final double targetLatitude;
   final double targetLongitude;
   final double visitorLatitude;
   final double visitorLongitude;
-  final double distance;
 
-  const CampasMapView({
+  const CampusMapView({
     super.key,
     required this.targetLatitude,
     required this.targetLongitude,
     required this.visitorLatitude,
     required this.visitorLongitude,
-    required this.distance,
   });
 
   @override
-  State<CampasMapView> createState() => _CampasMapViewState();
+  State<CampusMapView> createState() => _CampusMapViewState();
 }
 
-class _CampasMapViewState extends State<CampasMapView> {
+class _CampusMapViewState extends State<CampusMapView> {
   GoogleMapController? _googleMapController;
   StreamSubscription<gl.Position>? userPositionStream;
-  gl.Position? _currentPosition;
   String? _departmentName;
   Set<Marker> _markers = {};
   Polyline? _path;
+  late double _calculatedDistance;
 
   @override
   void initState() {
@@ -44,18 +42,13 @@ class _CampasMapViewState extends State<CampasMapView> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    _currentPosition = gl.Position(
-      latitude: widget.visitorLatitude,
-      longitude: widget.visitorLongitude,
-      timestamp: DateTime.now(),
-      accuracy: 0,
-      altitude: 0,
-      heading: 0,
-      speed: 0,
-      speedAccuracy: 0,
-      altitudeAccuracy: 0,
-      headingAccuracy: 0,
-    );
+    // Calculate distance based on initial coordinates
+    _calculatedDistance = gl.Geolocator.distanceBetween(
+      widget.visitorLatitude,
+      widget.visitorLongitude,
+      widget.targetLatitude,
+      widget.targetLongitude,
+    ) / 1000; // Convert to kilometers
     _requestLocationPermission();
   }
 
@@ -94,7 +87,7 @@ class _CampasMapViewState extends State<CampasMapView> {
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: Text(
-              'Distance to Department: ${(_currentPosition != null ? gl.Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, widget.targetLatitude, widget.targetLongitude) / 1000 : widget.distance / 1000).toStringAsFixed(2)} km (approx.)',
+              'Distance to Department: ${_calculatedDistance.toStringAsFixed(2)} km (approx.)',
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
           ),
@@ -177,11 +170,10 @@ class _CampasMapViewState extends State<CampasMapView> {
         setState(() {});
       }
 
-      // Update path dynamically
+      // Update path dynamically based on device location
       userPositionStream?.onData((gl.Position position) {
         if (!mounted || _googleMapController == null) return;
         setState(() {
-          _currentPosition = position;
           _markers.removeWhere((marker) => marker.markerId.value == 'visitor');
           _markers.add(
             Marker(
@@ -304,7 +296,7 @@ class _CampasMapViewState extends State<CampasMapView> {
     ).listen((gl.Position position) {
       if (!mounted || _googleMapController == null) return;
       setState(() {
-        _currentPosition = position;
+        // No distance update here, only path
       });
     });
   }

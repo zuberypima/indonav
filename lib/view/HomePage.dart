@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:indonav/view/CampasMapView.dart';
+import 'package:indonav/view/CampusMap.dart';
 import 'package:indonav/view/QRScannerPage.dart';
 import 'package:indonav/view/VisitorRegistrationPage.dart';
 import 'package:indonav/view/loginpage.dart';
@@ -273,16 +274,7 @@ class _HomePageState extends State<HomePage> {
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder:
-                                (context) => CampasMapView(
-                                  visitorLatitude: 33.416138,
-                                  visitorLongitude: -8.941800,
-                                  targetLatitude: 33.416138,
-                                  targetLongitude: -8.941800,
-                                  distance: 10,
-                                ),
-                          ),
+                          MaterialPageRoute(builder: (context) => CampusMap()),
                         );
                       },
                     ),
@@ -505,12 +497,11 @@ class _HomePageState extends State<HomePage> {
                     context,
                     MaterialPageRoute(
                       builder:
-                          (context) => CampasMapView(
+                          (context) => CampusMapView(
                             visitorLatitude: latitude,
                             visitorLongitude: longitude,
                             targetLatitude: latitude,
                             targetLongitude: longitude,
-                            distance: 10,
                           ),
                     ),
                   );
