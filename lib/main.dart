@@ -46,11 +46,9 @@ class MyApp extends StatelessWidget {
                     // User is signed in, navigate to VisitorHomePage
                     return HomePage(visitorName: '');
                   } else {
-                    // User is not signed in, navigate to LoginPage
                     return LoginPage();
                   }
                 }
-                // Show loading while checking auth state
                 return const Center(child: CircularProgressIndicator());
               },
             );

@@ -284,7 +284,6 @@ class _CampusMapViewState extends State<CampusMapView> {
     ).listen((gl.Position position) {
       if (!mounted || _googleMapController == null) return;
       setState(() {
-        // No distance update here, only path
       });
     });
   }
