@@ -44,9 +44,7 @@ class MyApp extends StatelessWidget {
                   final User? user = authSnapshot.data;
                   if (user != null) {
                     // User is signed in, navigate to VisitorHomePage
-                    return
-                    // CampusMap();
-                    HomePage(visitorName: '');
+                    return HomePage(visitorName: '');
                   } else {
                     // User is not signed in, navigate to LoginPage
                     return LoginPage();
