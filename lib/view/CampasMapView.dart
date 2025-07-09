@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as gl;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:indonav/view/HomePage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -30,7 +29,6 @@ class CampusMapView extends StatefulWidget {
 class _CampusMapViewState extends State<CampusMapView> {
   GoogleMapController? _googleMapController;
   StreamSubscription<gl.Position>? userPositionStream;
-  String? _departmentName;
   Set<Marker> _markers = {};
   Polyline? _path;
   late double _calculatedDistance;
@@ -43,12 +41,14 @@ class _CampusMapViewState extends State<CampusMapView> {
       DeviceOrientation.landscapeRight,
     ]);
     // Calculate distance based on initial coordinates
-    _calculatedDistance = gl.Geolocator.distanceBetween(
-      widget.visitorLatitude,
-      widget.visitorLongitude,
-      widget.targetLatitude,
-      widget.targetLongitude,
-    ) / 1000; // Convert to kilometers
+    _calculatedDistance =
+        gl.Geolocator.distanceBetween(
+          widget.visitorLatitude,
+          widget.visitorLongitude,
+          widget.targetLatitude,
+          widget.targetLongitude,
+        ) /
+        1000; // Convert to kilometers
     _requestLocationPermission();
   }
 
@@ -87,7 +87,7 @@ class _CampusMapViewState extends State<CampusMapView> {
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: Text(
-              'Distance to Department: ${_calculatedDistance.toStringAsFixed(2)} km (approx.)',
+              'Distance to Target: ${_calculatedDistance.toStringAsFixed(2)} km (approx.)',
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
           ),
@@ -101,7 +101,10 @@ class _CampusMapViewState extends State<CampusMapView> {
               ? GoogleMap(
                 onMapCreated: _onMapCreated,
                 initialCameraPosition: CameraPosition(
-                  target: LatLng(widget.targetLatitude, widget.targetLongitude),
+                  target: LatLng(
+                    (widget.targetLatitude + widget.visitorLatitude) / 2,
+                    (widget.targetLongitude + widget.visitorLongitude) / 2,
+                  ),
                   zoom: 15,
                 ),
                 markers: _markers,
@@ -123,36 +126,21 @@ class _CampusMapViewState extends State<CampusMapView> {
     });
 
     try {
-      // Fetch department name from Firestore
-      final deptQuery =
-          await FirebaseFirestore.instance
-              .collection('departments')
-              .where('latitude', isEqualTo: widget.targetLatitude.toString())
-              .where('longitude', isEqualTo: widget.targetLongitude.toString())
-              .limit(1)
-              .get();
-      if (deptQuery.docs.isNotEmpty) {
-        _departmentName =
-            deptQuery.docs.first.data()['name'] ?? 'Unknown Department';
-      } else {
-        _departmentName = 'Unknown Department';
-      }
-
-      // Add markers
+      // Add initial markers
       _markers.add(
         Marker(
           markerId: const MarkerId('visitor'),
           position: LatLng(widget.visitorLatitude, widget.visitorLongitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-          infoWindow: const InfoWindow(title: 'You are here'),
+          infoWindow: const InfoWindow(title: 'Your Location'),
         ),
       );
       _markers.add(
         Marker(
-          markerId: const MarkerId('department'),
+          markerId: const MarkerId('target'),
           position: LatLng(widget.targetLatitude, widget.targetLongitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: InfoWindow(title: _departmentName ?? 'Department'),
+          infoWindow: const InfoWindow(title: 'Target Location'),
         ),
       );
 
@@ -162,10 +150,10 @@ class _CampusMapViewState extends State<CampusMapView> {
       final points = await fetchDirections(origin, destination);
       if (points.isNotEmpty) {
         _path = Polyline(
-          polylineId: const PolylineId('path'),
+          polylineId: const PolylineId('route'),
           points: points,
           color: Colors.green,
-          width: 3,
+          width: 5,
         );
         setState(() {});
       }
@@ -182,7 +170,7 @@ class _CampusMapViewState extends State<CampusMapView> {
               icon: BitmapDescriptor.defaultMarkerWithHue(
                 BitmapDescriptor.hueBlue,
               ),
-              infoWindow: const InfoWindow(title: 'You are here'),
+              infoWindow: const InfoWindow(title: 'Your Location'),
             ),
           );
         });
@@ -194,10 +182,10 @@ class _CampusMapViewState extends State<CampusMapView> {
           if (newPoints.isNotEmpty) {
             setState(() {
               _path = Polyline(
-                polylineId: const PolylineId('path'),
+                polylineId: const PolylineId('route'),
                 points: newPoints,
                 color: Colors.green,
-                width: 3,
+                width: 5,
               );
             });
           }
@@ -218,7 +206,7 @@ class _CampusMapViewState extends State<CampusMapView> {
     LatLng origin,
     LatLng destination,
   ) async {
-    const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY'; // Replace with your API key
+    const apiKey = 'AIzaSyBOpRefK-45E8lUfGUaicXtSklxLA-XWaY'; // Your API key
     final url =
         'https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=$apiKey';
 
